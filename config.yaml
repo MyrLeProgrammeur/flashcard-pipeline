@@ -1,0 +1,22 @@
+paths:
+  # Dossier où tu déposes tes cours (PDF, PPTX, MD, TXT)
+  # Si tu utilises Syncthing, pointe vers le dossier synchronisé
+  input_dir: "~/Sync/Cours"
+
+  # Dossier où les .apkg seront écrits (synchronisé avec AnkiDroid via Syncthing)
+  output_dir: "~/Sync/Flashcards"
+
+  # Fichiers d'état (ne pas modifier)
+  state_file: "~/.local/share/flashcard-pipeline/processed_files.json"
+  themes_file: "~/.local/share/flashcard-pipeline/themes.json"
+
+infercom:
+  base_url: "https://api.infercom.ai/v1"
+  analyst_model: "gpt-oss-120b"      # analyse des cours
+  aggregator_model: "gemma-4-31B-it" # fusion des thèmes (tâche légère)
+  builder_model: "gpt-oss-120b"      # génération des flashcards
+
+pipeline:
+  supported_extensions: [".pdf", ".pptx", ".ppt", ".md", ".txt"]
+  max_parallel_files: 5   # fichiers analysés en parallèle
+  max_parallel_themes: 5  # thèmes traités en parallèle

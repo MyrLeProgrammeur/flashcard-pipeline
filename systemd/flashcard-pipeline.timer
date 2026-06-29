@@ -1,0 +1,11 @@
+[Unit]
+Description=Lance le pipeline flashcard toutes les heures
+Requires=flashcard-pipeline.service
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1h
+Unit=flashcard-pipeline.service
+
+[Install]
+WantedBy=timers.target

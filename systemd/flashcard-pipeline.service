@@ -1,0 +1,14 @@
+[Unit]
+Description=Flashcard Pipeline — génération AnyMemo depuis les cours
+After=network.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/dev/flashcard-pipeline
+ExecStart=%h/dev/flashcard-pipeline/.venv/bin/python3 %h/dev/flashcard-pipeline/pipeline.py
+EnvironmentFile=%h/.config/flashcard-pipeline/env
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
