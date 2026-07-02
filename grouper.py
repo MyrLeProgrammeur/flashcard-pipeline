@@ -57,12 +57,14 @@ class DocumentGroup:
 
 def group_files(files: list[Path]) -> list[DocumentGroup]:
     """
-    Grouping strategy (in priority order):
-    1. Same folder + same stripped base name → same group (e.g. "CI TD" + "CI TD Corrected")
-    2. Same folder + different base names → one group per folder (e.g. "Foundations of ML" +
-       "Foundations of Machine Learning" in the same folder are treated as one course unit)
+    Grouping: same folder + same stripped base name → same group
+    (e.g. "CI TD" + "CI TD Corrected", or a lecture + its annotated version).
+
+    Each document (or lecture+annotated / TD+corrected pair) stays its own group;
+    the folder is tracked on the group so the caller can use it as the matière.
+    A matière folder holding many chapters therefore yields one group per chapter —
+    no file is dropped — and they all share the same folder (→ same matière).
     """
-    # First pass: strict name-based grouping
     strict: dict[tuple[Path, str], DocumentGroup] = {}
     for f in files:
         key = (f.parent, _base_name(f))
@@ -70,18 +72,4 @@ def group_files(files: list[Path]) -> list[DocumentGroup]:
             strict[key] = DocumentGroup(base_name=_base_name(f), folder=f.parent)
         strict[key].add(f)
 
-    # Second pass: merge groups that are in the same folder
-    # (different base names in the same folder = same course, different documents)
-    by_folder: dict[Path, DocumentGroup] = {}
-    for (folder, base), group in strict.items():
-        if folder not in by_folder:
-            by_folder[folder] = DocumentGroup(base_name=base, folder=folder)
-        for doc_type, filepath in group.files.items():
-            # Avoid overwriting if same doc_type already exists in folder group
-            if doc_type not in by_folder[folder].files:
-                by_folder[folder].files[doc_type] = filepath
-            else:
-                # Suffix the doc_type to keep both
-                by_folder[folder].files[f"{doc_type}_2"] = filepath
-
-    return list(by_folder.values())
+    return list(strict.values())

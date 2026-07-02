@@ -128,11 +128,28 @@ def run_pipeline(config_path: Path = Path("config.yaml")):
         log.warning("No successful analyses.")
         return
 
-    # 4. Aggregate themes by subject
+    # 4. Group themes by matière — the matière is the FOLDER under input_dir, not
+    #    the analyst's content-derived subject (a single chapter would otherwise
+    #    become its own matière). The relative folder path becomes the deck root,
+    #    with sub-folders mapped to Anki's "::" nesting. The analyst's subject is
+    #    kept only for theme extraction, no longer for the deck root.
+    def matiere_of(group: DocumentGroup, analysis: dict) -> str:
+        try:
+            rel = group.folder.relative_to(input_dir)
+        except ValueError:
+            rel = Path(group.folder.name)
+        parts = [p.replace("_", " ").strip() for p in rel.parts if p not in (".", "")]
+        if parts:
+            return "::".join(parts)
+        # File dumped directly in input_dir with no matière folder: fall back to the
+        # analyst's subject so the card isn't lost, but flag the missing folder.
+        log.warning(f"No matière folder for {group.folder} — using analyst subject.")
+        return analysis["subject"]
+
     by_subject: dict[str, list[tuple[DocumentGroup, list]]] = {}
     for group, analysis in analyses:
-        subject = analysis["subject"]
-        by_subject.setdefault(subject, []).append((group, analysis["themes"]))
+        matiere = matiere_of(group, analysis)
+        by_subject.setdefault(matiere, []).append((group, analysis["themes"]))
 
     group_themes_map: dict[str, list[str]] = {}  # group.base_name → canonical themes
     subject_outcome: dict[str, tuple[Path, int, bool]] = {}  # subject → (apkg, total_added, had_error)
