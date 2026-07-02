@@ -21,6 +21,7 @@ Rules:
 - Vary formats: definition, statement of theorem, key formula, crucial distinction between two concepts, "why does X hold".
 - Generate 5–15 cards depending on content richness.
 - Avoid duplicating any of the existing questions listed.
+- Math notation: whenever a card's question, answer, or note contains ANY mathematical notation — a variable, a function like f(x), a Greek letter, a sub/superscript (e.g. sigma^2), a sum, a fraction, an operator, or a full formula, however trivial — you MUST wrap it in LaTeX. Never write math as plain text. Use $...$ for inline math and $$...$$ for standalone display formulas.
 
 Output ONLY valid JSON, no markdown:
 {
@@ -46,6 +47,7 @@ Rules:
 - These cards tell the student "I need to know how to solve this CLASS of problem" — not just recall a fact.
 - Generate 3–8 cards depending on the number of distinct problem types.
 - Avoid duplicating any of the existing questions listed.
+- Math notation: whenever a card's question, answer, or note contains ANY mathematical notation — a variable, a function like f(x), a Greek letter, a sub/superscript (e.g. sigma^2), a sum, a fraction, an operator, or a full formula, however trivial — you MUST wrap it in LaTeX. Never write math as plain text. Use $...$ for inline math and $$...$$ for standalone display formulas.
 
 Output ONLY valid JSON, no markdown:
 {
