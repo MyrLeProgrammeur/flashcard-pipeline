@@ -21,7 +21,13 @@ def parse_json_response(raw: str) -> dict | list:
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        # Fix invalid backslash escapes: replace \x (where x is not a valid JSON escape)
-        # Valid JSON escapes: \" \\ \/ \b \f \n \r \t \uXXXX
-        fixed = re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', text)
+        # Fix invalid backslash escapes: replace \x with \\x unless \x is a genuine
+        # JSON escape. A backslash is left alone only when it is:
+        #   - a structural escape: \" \\ \/
+        #   - one of \b \f \n \r \t NOT followed by a letter (a real control escape,
+        #     not the start of a LaTeX command like \nu, \tau, \beta)
+        #   - \uXXXX with exactly 4 hex digits (real unicode escape)
+        # Everything else (LaTeX commands such as \frac, \alpha, \sigma, \upsilon,
+        # \( ...) gets its backslash doubled so it survives as a literal backslash.
+        fixed = re.sub(r'\\(?!["\\/]|[bfnrt](?![A-Za-z])|u[0-9A-Fa-f]{4})', r'\\\\', text)
         return json.loads(fixed)

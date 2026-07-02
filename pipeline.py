@@ -44,7 +44,7 @@ def subject_to_filename(subject: str) -> str:
 
 
 def process_group(
-    client: anthropic.Anthropic,
+    client: OpenAI,
     cfg: dict,
     group: DocumentGroup,
     state: StateManager,
