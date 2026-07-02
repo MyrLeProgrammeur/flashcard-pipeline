@@ -28,14 +28,21 @@ class StateManager:
 
     def is_processed(self, filepath: Path) -> bool:
         key = str(filepath)
-        if key not in self._data:
+        entry = self._data.get(key)
+        if entry is None or entry["hash"] != file_hash(filepath):
             return False
-        return self._data[key]["hash"] == file_hash(filepath)
+        # The output this file fed into was recorded but no longer exists
+        # (deck deleted / never synced) → treat as unprocessed so it rebuilds.
+        apkg = entry.get("apkg")
+        if apkg and not Path(apkg).exists():
+            return False
+        return True
 
-    def mark_processed(self, filepath: Path, themes: list[str]):
+    def mark_processed(self, filepath: Path, themes: list[str], apkg: Path | None = None):
         self._data[str(filepath)] = {
             "hash": file_hash(filepath),
             "themes": themes,
+            "apkg": str(apkg) if apkg else None,
         }
         _save(self.state_file, self._data)
 

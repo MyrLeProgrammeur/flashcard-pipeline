@@ -32,7 +32,7 @@ log = logging.getLogger(__name__)
 def load_config(config_path: Path) -> dict:
     with open(config_path) as f:
         cfg = yaml.safe_load(f)
-    for key in ("state_file", "themes_file"):
+    for key in ("input_dir", "output_dir", "state_file", "themes_file"):
         cfg["paths"][key] = str(Path(cfg["paths"][key]).expanduser())
     return cfg
 
@@ -135,6 +135,7 @@ def run_pipeline(config_path: Path = Path("config.yaml")):
         by_subject.setdefault(subject, []).append((group, analysis["themes"]))
 
     group_themes_map: dict[str, list[str]] = {}  # group.base_name → canonical themes
+    subject_outcome: dict[str, tuple[Path, int, bool]] = {}  # subject → (apkg, total_added, had_error)
 
     for subject, group_theme_list in by_subject.items():
         existing_themes = registry.get_themes(subject)
@@ -181,7 +182,8 @@ def run_pipeline(config_path: Path = Path("config.yaml")):
         db_path = output_dir / subject_to_filename(subject)
 
         # 5. Build flashcards per theme (parallel)
-        def build_theme(canonical: str) -> tuple[str, list[dict], list[dict]]:
+        def build_theme(canonical: str) -> tuple[str, list[dict], list[dict], bool]:
+            errored = False
             recall_existing = get_existing_questions_for_theme(db_path, f"{subject}::{canonical}")
             problem_existing = get_existing_questions_for_theme(db_path, f"{subject}::{canonical}::Problems")
             try:
@@ -196,6 +198,7 @@ def run_pipeline(config_path: Path = Path("config.yaml")):
             except Exception as e:
                 log.error(f"Builder [recall/{canonical}]: {e}")
                 recall_cards = []
+                errored = True
 
             try:
                 problem_cards = build_problem_flashcards(
@@ -209,8 +212,9 @@ def run_pipeline(config_path: Path = Path("config.yaml")):
             except Exception as e:
                 log.error(f"Builder [problems/{canonical}]: {e}")
                 problem_cards = []
+                errored = True
 
-            return canonical, recall_cards, problem_cards
+            return canonical, recall_cards, problem_cards, errored
 
         all_canonicals = list(set(list(canonical_recall.keys()) + list(canonical_problems.keys())))
         with ThreadPoolExecutor(max_workers=cfg["pipeline"]["max_parallel_themes"]) as ex:
@@ -218,7 +222,9 @@ def run_pipeline(config_path: Path = Path("config.yaml")):
 
         # 6. Write to .db
         total_added = 0
-        for canonical, recall_cards, problem_cards in results:
+        had_error = False
+        for canonical, recall_cards, problem_cards, errored in results:
+            had_error = had_error or errored
             if recall_cards:
                 deck = f"{subject}::{canonical}"
                 n = write_flashcards(db_path, deck, recall_cards)
@@ -231,12 +237,22 @@ def run_pipeline(config_path: Path = Path("config.yaml")):
                 total_added += n
 
         log.info(f"[{subject}] Total: {total_added} flashcards added → {db_path.name}")
+        subject_outcome[subject] = (db_path, total_added, had_error)
 
-    # 7. Mark files as processed
+    # 7. Mark files as processed — but never lock a file whose subject built
+    #    nothing due to an error (retry next run), and record the .apkg it fed
+    #    into so a deleted deck re-qualifies the file for rebuilding.
     for group, analysis in analyses:
+        outcome = subject_outcome.get(analysis["subject"])
+        if outcome is None:
+            continue  # subject skipped (e.g. aggregator error) → retry next run
+        db_path, total_added, had_error = outcome
+        if had_error and total_added == 0:
+            continue  # every build errored out → don't lock, retry next run
+        apkg = db_path if total_added > 0 else None
         themes = group_themes_map.get(group.base_name, [])
         for filepath in group.all_files:
-            state.mark_processed(filepath, themes)
+            state.mark_processed(filepath, themes, apkg)
 
     log.info("Pipeline complete.")
 

@@ -3,6 +3,8 @@ Builder agent: generates flashcards from a theme's content.
 Produces two card types: RECALL (memorization) and PROBLEM (reasoning/calculation).
 All output in English.
 """
+import json
+
 from openai import OpenAI
 
 from json_utils import parse_json_response
