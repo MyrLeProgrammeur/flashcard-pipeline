@@ -7,6 +7,7 @@ import json
 
 from openai import OpenAI
 
+import token_usage
 from json_utils import parse_json_response
 
 RECALL_SYSTEM_PROMPT = """You are an expert in spaced repetition pedagogy for graduate-level mathematics and machine learning.
@@ -66,7 +67,7 @@ def build_recall_flashcards(
     theme: str,
     recall_concepts: list[str],
     existing_questions: list[str],
-) -> list[dict]:
+) -> tuple[list[dict], dict]:
     existing_section = ""
     if existing_questions:
         existing_section = f"\nAlready existing questions for this theme (DO NOT duplicate):\n{json.dumps(existing_questions[:30], ensure_ascii=False)}\n"
@@ -87,7 +88,8 @@ Generate RECALL flashcards."""
             {"role": "user", "content": prompt},
         ],
     )
-    return parse_json_response(response.choices[0].message.content.strip()).get("flashcards", [])
+    flashcards = parse_json_response(response.choices[0].message.content.strip()).get("flashcards", [])
+    return flashcards, token_usage.extract(response)
 
 
 def build_problem_flashcards(
@@ -97,9 +99,9 @@ def build_problem_flashcards(
     theme: str,
     problem_types: list[str],
     existing_questions: list[str],
-) -> list[dict]:
+) -> tuple[list[dict], dict]:
     if not problem_types:
-        return []
+        return [], token_usage.zero()
 
     existing_section = ""
     if existing_questions:
@@ -121,4 +123,5 @@ Generate PROBLEM-TYPE flashcards."""
             {"role": "user", "content": prompt},
         ],
     )
-    return parse_json_response(response.choices[0].message.content.strip()).get("flashcards", [])
+    flashcards = parse_json_response(response.choices[0].message.content.strip()).get("flashcards", [])
+    return flashcards, token_usage.extract(response)

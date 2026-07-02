@@ -6,6 +6,7 @@ from pathlib import Path
 
 from openai import OpenAI
 
+import token_usage
 from json_utils import parse_json_response
 
 SYSTEM_PROMPT = """You are an expert mathematical and scientific teaching assistant analyzing graduate-level course materials (M1/M2 level).
@@ -73,4 +74,6 @@ def analyze_group(
     )
 
     raw = response.choices[0].message.content.strip()
-    return parse_json_response(raw)
+    result = parse_json_response(raw)
+    result["_usage"] = token_usage.extract(response)
+    return result

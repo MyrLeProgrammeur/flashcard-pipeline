@@ -45,3 +45,18 @@ def test_markdown_fenced_json_still_parses():
     payload = '```json\n{"a": 1, "b": [1, 2, 3]}\n```'
     result = parse_json_response(payload)
     assert result == {"a": 1, "b": [1, 2, 3]}
+
+
+def test_json_repair_fallback_handles_latex_math_that_breaks_regex_fix():
+    # Reproduces the real "problems" batch failure: $...$ / $$...$$ math mixed
+    # with a stray doubled backslash (e.g. a LaTeX matrix line-break "\\\\")
+    # that the regex-escape-fix still turns into an invalid escape, so
+    # json.loads keeps raising "Invalid \escape" even after that fallback.
+    payload = (
+        r'{"question": "Solve $\frac{1}{n}\sum x_i$", '
+        r'"answer": "Note $$\hat\sigma^2$$ and matrix row \\\\ next"}'
+    )
+    result = parse_json_response(payload)
+
+    assert r"\frac{1}{n}\sum x_i" in result["question"]
+    assert r"\hat\sigma^2" in result["answer"]

@@ -1,6 +1,7 @@
 """
 Flashcard pipeline entry point. Launched hourly by systemd timer.
 """
+import difflib
 import logging
 import os
 import re
@@ -12,10 +13,12 @@ from dotenv import load_dotenv
 from openai import OpenAI
 import yaml
 
+import token_usage
 from agents.analyst import analyze_group
 from agents.aggregator import aggregate_themes
 from agents.builder import build_recall_flashcards, build_problem_flashcards
 from db_writer import write_flashcards, get_existing_questions_for_theme
+from dedup import deduplicate_cards
 from grouper import group_files, DocumentGroup
 from parsers import parse_file
 from state import StateManager
@@ -147,9 +150,13 @@ def run_pipeline(config_path: Path = Path("config.yaml")):
         return analysis["subject"]
 
     by_subject: dict[str, list[tuple[DocumentGroup, list]]] = {}
+    subject_tokens: dict[str, dict] = {}  # subject → accumulated {prompt,completion,total}_tokens
     for group, analysis in analyses:
         matiere = matiere_of(group, analysis)
         by_subject.setdefault(matiere, []).append((group, analysis["themes"]))
+        subject_tokens[matiere] = token_usage.add(
+            subject_tokens.get(matiere, token_usage.zero()), analysis.get("_usage", token_usage.zero())
+        )
 
     group_themes_map: dict[str, list[str]] = {}  # group.base_name → canonical themes
     subject_outcome: dict[str, tuple[Path, int, bool]] = {}  # subject → (apkg, total_added, had_error)
@@ -172,6 +179,10 @@ def run_pipeline(config_path: Path = Path("config.yaml")):
             log.error(f"Aggregator error [{subject}]: {e}")
             continue
 
+        subject_tokens[subject] = token_usage.add(
+            subject_tokens.get(subject, token_usage.zero()), agg_result.get("_usage", token_usage.zero())
+        )
+
         registry.update(subject, agg_result.get("resolved", {}))
 
         # Build alias → canonical map
@@ -183,6 +194,26 @@ def run_pipeline(config_path: Path = Path("config.yaml")):
         for new_theme in agg_result.get("new_themes", []):
             alias_to_canonical[new_theme] = new_theme
 
+        # Total coverage fallback: the aggregator is supposed to place every
+        # proposed theme in "resolved" or "new_themes" (see aggregator's HARD
+        # coverage rule), but if it still misses one, do NOT build it under its
+        # raw proposed name (that's how near-duplicate themes leaked into decks).
+        # Map it onto the closest canonical already produced this round instead.
+        canonical_pool = sorted(set(alias_to_canonical.values()))
+
+        def resolve_canonical(name: str) -> str:
+            canonical = alias_to_canonical.get(name)
+            if canonical is not None:
+                return canonical
+            match = difflib.get_close_matches(name, canonical_pool, n=1, cutoff=0.0) if canonical_pool else []
+            canonical = match[0] if match else name
+            if match:
+                log.warning(f"[{subject}] Theme {name!r} missing from aggregator result — mapped to closest canonical {canonical!r}.")
+            else:
+                log.warning(f"[{subject}] Theme {name!r} missing from aggregator result and no canonical pool available — using raw name.")
+            alias_to_canonical[name] = canonical
+            return canonical
+
         # Collect recall_concepts and problem_types per canonical theme
         canonical_recall: dict[str, list[str]] = {}
         canonical_problems: dict[str, list[str]] = {}
@@ -190,7 +221,7 @@ def run_pipeline(config_path: Path = Path("config.yaml")):
         for group, themes in group_theme_list:
             canonicals_for_group = []
             for t in themes:
-                canonical = alias_to_canonical.get(t["name"], t["name"])
+                canonical = resolve_canonical(t["name"])
                 canonicals_for_group.append(canonical)
                 canonical_recall.setdefault(canonical, []).extend(t.get("recall_concepts", []))
                 canonical_problems.setdefault(canonical, []).extend(t.get("problem_types", []))
@@ -199,12 +230,13 @@ def run_pipeline(config_path: Path = Path("config.yaml")):
         db_path = output_dir / subject_to_filename(subject)
 
         # 5. Build flashcards per theme (parallel)
-        def build_theme(canonical: str) -> tuple[str, list[dict], list[dict], bool]:
+        def build_theme(canonical: str) -> tuple[str, list[dict], list[dict], bool, dict]:
             errored = False
+            usage = token_usage.zero()
             recall_existing = get_existing_questions_for_theme(db_path, f"{subject}::{canonical}")
             problem_existing = get_existing_questions_for_theme(db_path, f"{subject}::{canonical}::Problems")
             try:
-                recall_cards = build_recall_flashcards(
+                recall_cards, recall_usage = build_recall_flashcards(
                     client=client,
                     model=cfg["infercom"]["builder_model"],
                     subject=subject,
@@ -212,13 +244,14 @@ def run_pipeline(config_path: Path = Path("config.yaml")):
                     recall_concepts=canonical_recall.get(canonical, []),
                     existing_questions=recall_existing,
                 )
+                usage = token_usage.add(usage, recall_usage)
             except Exception as e:
                 log.error(f"Builder [recall/{canonical}]: {e}")
                 recall_cards = []
                 errored = True
 
             try:
-                problem_cards = build_problem_flashcards(
+                problem_cards, problem_usage = build_problem_flashcards(
                     client=client,
                     model=cfg["infercom"]["builder_model"],
                     subject=subject,
@@ -226,34 +259,48 @@ def run_pipeline(config_path: Path = Path("config.yaml")):
                     problem_types=canonical_problems.get(canonical, []),
                     existing_questions=problem_existing,
                 )
+                usage = token_usage.add(usage, problem_usage)
             except Exception as e:
                 log.error(f"Builder [problems/{canonical}]: {e}")
                 problem_cards = []
                 errored = True
 
-            return canonical, recall_cards, problem_cards, errored
+            return canonical, recall_cards, problem_cards, errored, usage
 
         all_canonicals = list(set(list(canonical_recall.keys()) + list(canonical_problems.keys())))
         with ThreadPoolExecutor(max_workers=cfg["pipeline"]["max_parallel_themes"]) as ex:
             results = list(ex.map(build_theme, all_canonicals))
 
-        # 6. Write to .db
-        total_added = 0
+        # 6. Cross-theme dedup (duplicates can span themes), then write to .db
         had_error = False
-        for canonical, recall_cards, problem_cards, errored in results:
+        all_cards: list[dict] = []
+        for canonical, recall_cards, problem_cards, errored, usage in results:
             had_error = had_error or errored
-            if recall_cards:
-                deck = f"{subject}::{canonical}"
-                n = write_flashcards(db_path, deck, recall_cards)
-                log.info(f"  [{deck}] +{n} recall cards")
-                total_added += n
-            if problem_cards:
-                deck = f"{subject}::{canonical}::Problems"
-                n = write_flashcards(db_path, deck, problem_cards)
-                log.info(f"  [{deck}] +{n} problem cards")
-                total_added += n
+            subject_tokens[subject] = token_usage.add(subject_tokens.get(subject, token_usage.zero()), usage)
+            for c in recall_cards:
+                c["_deck"] = f"{subject}::{canonical}"
+                all_cards.append(c)
+            for c in problem_cards:
+                c["_deck"] = f"{subject}::{canonical}::Problems"
+                all_cards.append(c)
 
+        kept_cards, dropped = deduplicate_cards(all_cards, client, cfg["infercom"]["aggregator_model"])
+        log.info(f"[{subject}] dedup: dropped {dropped} duplicate card(s)")
+
+        cards_by_deck: dict[str, list[dict]] = {}
+        for c in kept_cards:
+            deck = c.pop("_deck")
+            cards_by_deck.setdefault(deck, []).append(c)
+
+        total_added = 0
+        for deck, deck_cards in cards_by_deck.items():
+            n = write_flashcards(db_path, deck, deck_cards)
+            log.info(f"  [{deck}] +{n} card(s)")
+            total_added += n
+
+        t = subject_tokens.get(subject, token_usage.zero())
         log.info(f"[{subject}] Total: {total_added} flashcards added → {db_path.name}")
+        log.info(f"[{subject}] tokens: prompt={t['prompt_tokens']} completion={t['completion_tokens']} total={t['total_tokens']}")
         subject_outcome[subject] = (db_path, total_added, had_error)
 
     # 7. Mark files as processed — but never lock a file whose subject built
