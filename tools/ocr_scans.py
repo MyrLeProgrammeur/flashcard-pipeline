@@ -71,21 +71,51 @@ def render_pdf_to_images(filepath: Path, dpi: int = 200) -> list[bytes]:
     return images
 
 
+OCR_PROMPT = (
+    "You are an OCR engine for scanned/handwritten university mathematics — "
+    "lecture notes, exercise sheets and exam solutions. Transcribe ALL content "
+    "of the following page image(s) into clean Markdown, in reading order. "
+    "Render every mathematical expression in LaTeX: $...$ for inline, $$...$$ "
+    "for display equations. Preserve structure (headings, numbered problems, "
+    "solution steps, lists). Transcribe faithfully; do not solve, summarise or "
+    "add commentary. If something is illegible, write [illegible]. Output only "
+    "the transcription."
+)
+
+
 def ocr_images(images: list[bytes], *, provider: str, api_key: str, model: str) -> str:
     """Send page images to a hosted VLM and return the OCR'd Markdown text.
 
-    # TODO: wire the chosen vision provider (Claude / Gemini / Mistral).
-    No vision provider has been picked yet (Infercom, the pipeline's current
-    LLM host, has no vision model), so this is intentionally unimplemented.
-    Once a provider is chosen: call its vision API with `images` (one call
-    per page or batched, provider-dependent), concatenate the per-page
-    Markdown transcriptions in page order, and return the result.
+    Wired for Google Gemini via its OpenAI-compatible endpoint (reuses the
+    `openai` SDK already in requirements — no extra dependency). All pages of a
+    PDF are sent in a single request as inline base64 images, in page order.
     """
-    raise NotImplementedError(
-        f"ocr_images() not wired up yet for provider={provider!r} model={model!r}. "
-        "Pick a vision-capable provider (Claude / Gemini / Mistral) and implement "
-        "the API call here."
+    if provider not in ("google", "gemini"):
+        raise NotImplementedError(
+            f"ocr_images() is wired for Gemini only; got provider={provider!r}. "
+            "Add the API call for Claude/Mistral here if you switch provider."
+        )
+
+    import base64
+
+    from openai import OpenAI
+
+    client = OpenAI(
+        api_key=api_key,
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
     )
+    content = [{"type": "text", "text": OCR_PROMPT}]
+    for img in images:
+        b64 = base64.b64encode(img).decode()
+        content.append(
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}}
+        )
+
+    resp = client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": content}],
+    )
+    return resp.choices[0].message.content or ""
 
 
 def ocr_pdf_to_sidecar(
