@@ -284,7 +284,9 @@ def run_pipeline(config_path: Path = Path("config.yaml")):
                 c["_deck"] = f"{subject}::{canonical}::Problems"
                 all_cards.append(c)
 
-        kept_cards, dropped = deduplicate_cards(all_cards, client, cfg["infercom"]["aggregator_model"])
+        kept_cards, dropped = deduplicate_cards(
+            all_cards, client, cfg["infercom"]["aggregator_model"], cfg["infercom"]["embed_model"]
+        )
         log.info(f"[{subject}] dedup: dropped {dropped} duplicate card(s)")
 
         cards_by_deck: dict[str, list[dict]] = {}

@@ -1,10 +1,11 @@
 """
 Semantic de-duplication of generated flashcards.
 
-Runs on the PC (pipeline side): local embeddings (zero API cost) find candidate
-near-duplicate pairs (e.g. the same notion generated from a lecture + its exam),
-then a single cheap LLM call per candidate pair confirms whether they are truly
-redundant before dropping one. Never crashes the pipeline — any failure in the
+Runs on the PC (pipeline side): hosted E5-Mistral-7B-Instruct embeddings (Infercom)
+find candidate near-duplicate pairs (e.g. the same notion generated from a lecture +
+its exam), then a single cheap LLM call per candidate pair confirms whether they are
+truly redundant before dropping one. Never crashes the pipeline — any failure in the
+hosted embedding call falls back to local embeddings, and any failure in the local
 embedding stack or the LLM call falls back to "no dedup" (cards kept as-is).
 """
 import logging
@@ -34,7 +35,7 @@ Respond ONLY with valid JSON, no markdown:
 {"redundant": true or false}"""
 
 
-def _embed_texts(texts: list[str]) -> np.ndarray:
+def _embed_texts_local(texts: list[str]) -> np.ndarray:
     """Embed texts locally. Tries fastembed (ONNX, no torch) first, falls back to
     sentence-transformers. Raises on failure — caller handles the fallback."""
     try:
@@ -47,6 +48,24 @@ def _embed_texts(texts: list[str]) -> np.ndarray:
 
         model = SentenceTransformer(_EMBED_MODEL_ST)
         return np.array(model.encode(texts))
+
+
+def _embed_texts(texts: list[str], client: OpenAI, embed_model: str) -> np.ndarray:
+    """Embed texts via Infercom's hosted E5-Mistral-7B-Instruct model.
+
+    E5-Mistral is an instruct embedding model, but for symmetric near-duplicate
+    detection (comparing cards to each other, not queries to passages) embedding
+    the raw card text works fine — no query/passage prefix needed here.
+
+    NOTE: do not pass `encoding_format` — Infercom returns HTTP 400 if present.
+    Falls back to local embeddings if the hosted call fails.
+    """
+    try:
+        resp = client.embeddings.create(model=embed_model, input=texts)
+        return np.array([d.embedding for d in resp.data])
+    except Exception as e:
+        log.warning(f"Hosted embedding call failed, falling back to local embeddings: {e}")
+        return _embed_texts_local(texts)
 
 
 def _cosine_sim_matrix(embeddings: np.ndarray) -> np.ndarray:
@@ -84,12 +103,16 @@ Are these two cards redundant?"""
 
 
 def deduplicate_cards(
-    cards: list[dict], client: OpenAI, model: str, threshold: float = 0.88
+    cards: list[dict],
+    client: OpenAI,
+    model: str,
+    embed_model: str = "E5-Mistral-7B-Instruct",
+    threshold: float = 0.88,
 ) -> tuple[list[dict], int]:
     """
     Remove near-duplicate flashcards.
 
-    1. Embed each card locally (question + answer) — zero API cost.
+    1. Embed each card (question + answer) via the hosted embedding model.
     2. Flag pairs with cosine similarity >= threshold as candidates.
     3. For each candidate pair, ask a cheap LLM call to confirm true redundancy.
     4. Within a confirmed-redundant cluster, keep the first card, drop the rest.
@@ -102,7 +125,7 @@ def deduplicate_cards(
 
     try:
         texts = [_card_text(c) for c in cards]
-        embeddings = _embed_texts(texts)
+        embeddings = _embed_texts(texts, client, embed_model)
         sims = _cosine_sim_matrix(embeddings)
 
         n = len(cards)
