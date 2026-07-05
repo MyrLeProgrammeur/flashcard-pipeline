@@ -12,28 +12,23 @@ Both flashcard-companion/backend/pdf_context.py and
 flashcard-pipeline/parsers/pdf_parser.py already read `<stem>.ocr.md`
 sidecars as a fallback when text extraction returns empty.
 
-Target scans (Machine Learning 1 course has none, hence this tool):
-    ~/Téléchargements/COURS M1/Cours M1/Machine Learning 1/
-        DOC070318-07032018164153.pdf
-        DOC180219-18022019094741.pdf
-        Documents scannés.pdf
-        Slides_25_29.pdf
-        Slides_69_77.pdf
-        Solution_Ex7.pdf
+Typical use case: a course folder has scanned/handwritten PDFs with no
+text layer (e.g. lecture photos, scanned exercise sheets) mixed in with
+regular text-layer PDFs.
 
-Sidecars ultimately belong next to the synced copies in
-~/Sync/Cours/Machine Learning 1/ so they reach the phone via Syncthing —
-either run this script directly against that directory, or copy the
-generated `.ocr.md` files there afterwards.
+Sidecars ultimately belong next to the synced copies in the input
+directory (see `config.yaml`'s `input_dir`) so they reach the app via
+Syncthing — either run this script directly against that directory, or
+copy the generated `.ocr.md` files there afterwards.
 
 Usage:
     python tools/ocr_scans.py --provider anthropic --model claude-... \\
-        "~/Sync/Cours/Machine Learning 1/DOC070318-07032018164153.pdf" \\
-        "~/Sync/Cours/Machine Learning 1/Solution_Ex7.pdf"
+        "~/Sync/Cours/Some Course/scan1.pdf" \\
+        "~/Sync/Cours/Some Course/scan2.pdf"
 
     # Or set env vars instead of --provider/--api-key/--model:
     OCR_VLM_PROVIDER=anthropic OCR_VLM_API_KEY=sk-... OCR_VLM_MODEL=claude-... \\
-        python tools/ocr_scans.py --dry-run "~/Sync/Cours/Machine Learning 1/"*.pdf
+        python tools/ocr_scans.py --dry-run "~/Sync/Cours/Some Course/"*.pdf
 
 Requires (PC only, do NOT add to the Termux backend/requirements.txt):
     pip install pymupdf
