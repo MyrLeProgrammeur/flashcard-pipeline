@@ -42,7 +42,7 @@ Your courses (PDF/PPTX)
 ## Installation
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/flashcard-pipeline
+git clone https://github.com/MyrLeProgrammeur/flashcard-pipeline
 cd flashcard-pipeline
 bash install.sh
 ```
