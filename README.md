@@ -68,8 +68,9 @@ Get your key at [infercom.ai](https://infercom.ai).
 Edit `config.yaml`:
 ```yaml
 paths:
-  input_dir: "~/Sync/Cours"       # where you drop your course files
-  output_dir: "~/Sync/Flashcards" # where .apkg files are written
+  input_dir: "~/Sync/Cours"             # where you drop your course files
+  output_dir: "~/Sync/Flashcards"       # where .apkg files are written (synced)
+  local_output_dir: "~/Desktop/flashcards" # .md / .csv exports (local, NOT synced)
 ```
 
 ### 3. Syncthing setup (optional)
@@ -109,7 +110,20 @@ Re-importing after new courses are added is safe — scheduling data is preserve
 
 ## Output structure
 
-One `.apkg` per subject, with Anki sub-decks:
+Each run writes **three formats per subject**:
+
+| Format | Where | Synced to phone? | Purpose |
+|--------|-------|------------------|---------|
+| `.apkg` | `output_dir` (`~/Sync/Flashcards`) | ✅ yes | Import into any Anki client |
+| `.md` | `local_output_dir` (`~/Desktop/flashcards`) | ❌ local only | Obsidian, RemNote, plain reading |
+| `.csv` | `local_output_dir` (`~/Desktop/flashcards`) | ❌ local only | Quizlet, Notion, spreadsheets |
+
+Only the `.apkg` lands in the Syncthing folder and reaches AnkiDroid. The `.md`
+and `.csv` stay on the PC. Both are **full snapshots** read back from the
+finished `.apkg`, so they always contain the complete deck (all runs, after
+dedup) — not just the cards added in the latest run.
+
+The `.apkg` uses Anki sub-decks:
 
 ```
 Statistical Inference
@@ -118,6 +132,13 @@ Statistical Inference
   └── Pivotal Quantities
         └── Problems
 ```
+
+The `.md` and `.csv` flatten the same cards, tagging each with its full deck
+path (`Subject::Theme` / `Subject::Theme::Problems`).
+
+> **Note:** `.apkg` is Anki's format, not AnkiDroid-specific — it imports into
+> Anki Desktop, AnkiDroid, AnkiMobile (iOS) and AnkiWeb alike. The `.md` / `.csv`
+> exports are what let you feed the cards into non-Anki apps.
 
 ## Models used
 
