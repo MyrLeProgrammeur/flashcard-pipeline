@@ -6,6 +6,9 @@ paths:
   # Dossier où les .apkg seront écrits (synchronisé avec AnkiDroid via Syncthing)
   output_dir: "~/Sync/Flashcards"
 
+  # Dossier LOCAL pour les exports .md et .csv (NON synchronisé — reste sur le PC)
+  local_output_dir: "~/Desktop/flashcards"
+
   # Fichiers d'état (ne pas modifier)
   state_file: "~/.local/share/flashcard-pipeline/processed_files.json"
   themes_file: "~/.local/share/flashcard-pipeline/themes.json"

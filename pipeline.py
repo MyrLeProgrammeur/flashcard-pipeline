@@ -17,8 +17,9 @@ import token_usage
 from agents.analyst import analyze_group
 from agents.aggregator import aggregate_themes
 from agents.builder import build_recall_flashcards, build_problem_flashcards
-from db_writer import write_flashcards, get_existing_questions_for_theme
+from db_writer import write_flashcards, get_existing_questions_for_theme, read_all_cards
 from dedup import deduplicate_cards
+from exporters import write_markdown, write_csv
 from grouper import group_files, DocumentGroup
 from parsers import parse_file
 from state import StateManager
@@ -35,7 +36,7 @@ log = logging.getLogger(__name__)
 def load_config(config_path: Path) -> dict:
     with open(config_path) as f:
         cfg = yaml.safe_load(f)
-    for key in ("input_dir", "output_dir", "state_file", "themes_file"):
+    for key in ("input_dir", "output_dir", "local_output_dir", "state_file", "themes_file"):
         cfg["paths"][key] = str(Path(cfg["paths"][key]).expanduser())
     return cfg
 
@@ -85,6 +86,7 @@ def run_pipeline(config_path: Path = Path("config.yaml")):
 
     input_dir = Path(cfg["paths"]["input_dir"])
     output_dir = Path(cfg["paths"]["output_dir"])
+    local_output_dir = Path(cfg["paths"]["local_output_dir"])
     state_file = Path(cfg["paths"]["state_file"])
     themes_file = Path(cfg["paths"]["themes_file"])
 
@@ -299,6 +301,17 @@ def run_pipeline(config_path: Path = Path("config.yaml")):
             n = write_flashcards(db_path, deck, deck_cards)
             log.info(f"  [{deck}] +{n} card(s)")
             total_added += n
+
+        # Full-snapshot exports to a LOCAL dir (never synced to the phone).
+        try:
+            all_written = read_all_cards(db_path)
+            stem = subject_to_filename(subject).removesuffix(".apkg")
+            local_output_dir.mkdir(parents=True, exist_ok=True)
+            write_markdown(local_output_dir / f"{stem}.md", subject, all_written)
+            write_csv(local_output_dir / f"{stem}.csv", subject, all_written)
+            log.info(f"[{subject}] exported {len(all_written)} card(s) → {stem}.md / .csv (local)")
+        except Exception as e:
+            log.error(f"[{subject}] export error: {e}")
 
         t = subject_tokens.get(subject, token_usage.zero())
         log.info(f"[{subject}] Total: {total_added} flashcards added → {db_path.name}")

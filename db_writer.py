@@ -292,6 +292,33 @@ def write_flashcards(apkg_path: Path, deck_name: str, flashcards: list[dict]) ->
     return added
 
 
+def read_all_cards(apkg_path: Path) -> list[dict]:
+    """Return every card in the .apkg as {deck, question, answer, note}."""
+    if not apkg_path.exists():
+        return []
+    tmp_path = _extract_anki2(apkg_path)
+    conn = sqlite3.connect(tmp_path)
+    try:
+        decks = json.loads(conn.execute("SELECT decks FROM col").fetchone()[0])
+        id_to_name = {int(k): v["name"] for k, v in decks.items()}
+        rows = conn.execute(
+            "SELECT c.did, n.flds FROM cards c JOIN notes n ON n.id = c.nid"
+        ).fetchall()
+        cards = []
+        for did, flds in rows:
+            parts = flds.split("\x1f")
+            cards.append({
+                "deck": id_to_name.get(did, "Unknown"),
+                "question": parts[0] if len(parts) > 0 else "",
+                "answer": parts[1] if len(parts) > 1 else "",
+                "note": parts[2] if len(parts) > 2 else "",
+            })
+        return cards
+    finally:
+        conn.close()
+        Path(tmp_path).unlink(missing_ok=True)
+
+
 def get_existing_questions_for_theme(apkg_path: Path, deck_name: str) -> list[str]:
     """Return existing questions for a deck in the .apkg."""
     if not apkg_path.exists():
