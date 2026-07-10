@@ -34,7 +34,7 @@ Your courses (PDF/PPTX)
 ## Requirements
 
 - Python 3.10+
-- Linux (systemd for the hourly timer)
+- Linux (systemd for the 5-minute timer)
 - An [Infercom](https://infercom.ai) API key
 - [AnkiDroid](https://github.com/ankidroid/Anki-Android) on your phone
 - [Syncthing](https://syncthing.net) (optional, for phone sync)
@@ -50,7 +50,7 @@ bash install.sh
 The installer:
 1. Creates a Python virtualenv and installs dependencies
 2. Generates a `~/.config/flashcard-pipeline/env` file for your API key
-3. Installs a systemd user timer that runs the pipeline every hour
+3. Installs a systemd user timer that runs the pipeline every 5 minutes
 
 ## Configuration
 

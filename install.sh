@@ -57,12 +57,12 @@ EOF
 
 cat > "$SYSTEMD_DIR/flashcard-pipeline.timer" << EOF
 [Unit]
-Description=Lance le pipeline flashcard toutes les heures
+Description=Lance le pipeline flashcard toutes les 5 minutes
 Requires=flashcard-pipeline.service
 
 [Timer]
 OnBootSec=5min
-OnUnitActiveSec=1h
+OnUnitActiveSec=5min
 Unit=flashcard-pipeline.service
 
 [Install]
@@ -71,7 +71,7 @@ EOF
 
 systemctl --user daemon-reload
 systemctl --user enable --now flashcard-pipeline.timer
-echo "      OK — timer actif toutes les heures"
+echo "      OK — timer actif toutes les 5 minutes"
 
 # 5. Rappels config
 echo ""
