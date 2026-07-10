@@ -2,11 +2,13 @@
 OCR fallback generator: turns scanned/handwritten PDFs with no text layer
 into a Markdown sidecar `<name>.ocr.md` next to the source PDF.
 
-PC-only tool (never runs on the Termux phone target). Renders each PDF page
-to an image and sends the images to a hosted vision model (VLM); the actual
-provider call is NOT wired up yet (no vision-capable provider chosen — see
-`ocr_images()` below) so this script is a scaffold: everything except the
-VLM call itself works today, including --dry-run.
+PC-only tool (never runs on the Termux phone target). Renders each PDF page to
+an image and sends the images to Google Gemini via its OpenAI-compatible
+endpoint, in batches of `DEFAULT_BATCH_PAGES` pages per request.
+
+pipeline.py calls this automatically when a PDF yields no text and has no
+sidecar yet; running it by hand is only needed to pre-generate or re-generate
+a sidecar.
 
 Both flashcard-companion/backend/pdf_context.py and
 flashcard-pipeline/parsers/pdf_parser.py already read `<stem>.ocr.md`
@@ -78,12 +80,25 @@ OCR_PROMPT = (
 )
 
 
-def ocr_images(images: list[bytes], *, provider: str, api_key: str, model: str) -> str:
+#: Pages per request. Inline base64 images are the binding constraint (Gemini
+#: rejects requests over ~20 MB), not the model's token limit — a 200-page deck
+#: at 200 dpi is ~100 MB if sent whole. Batching keeps any document OCR-able.
+DEFAULT_BATCH_PAGES = 20
+
+
+def ocr_images(
+    images: list[bytes],
+    *,
+    provider: str,
+    api_key: str,
+    model: str,
+    batch_pages: int = DEFAULT_BATCH_PAGES,
+) -> str:
     """Send page images to a hosted VLM and return the OCR'd Markdown text.
 
     Wired for Google Gemini via its OpenAI-compatible endpoint (reuses the
-    `openai` SDK already in requirements — no extra dependency). All pages of a
-    PDF are sent in a single request as inline base64 images, in page order.
+    `openai` SDK already in requirements — no extra dependency). Pages are sent
+    in order, `batch_pages` at a time, and the transcriptions are concatenated.
     """
     if provider not in ("google", "gemini"):
         raise NotImplementedError(
@@ -99,18 +114,25 @@ def ocr_images(images: list[bytes], *, provider: str, api_key: str, model: str) 
         api_key=api_key,
         base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
     )
-    content = [{"type": "text", "text": OCR_PROMPT}]
-    for img in images:
-        b64 = base64.b64encode(img).decode()
-        content.append(
-            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}}
-        )
 
-    resp = client.chat.completions.create(
-        model=model,
-        messages=[{"role": "user", "content": content}],
-    )
-    return resp.choices[0].message.content or ""
+    chunks: list[str] = []
+    for start in range(0, len(images), batch_pages):
+        batch = images[start : start + batch_pages]
+        content = [{"type": "text", "text": OCR_PROMPT}]
+        for img in batch:
+            b64 = base64.b64encode(img).decode()
+            content.append(
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}}
+            )
+
+        log.info(f"  OCR pages {start + 1}-{start + len(batch)} of {len(images)}")
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": content}],
+        )
+        chunks.append(resp.choices[0].message.content or "")
+
+    return "\n\n".join(c.strip() for c in chunks if c.strip())
 
 
 def ocr_pdf_to_sidecar(
@@ -121,6 +143,7 @@ def ocr_pdf_to_sidecar(
     model: str,
     dpi: int,
     dry_run: bool,
+    batch_pages: int = DEFAULT_BATCH_PAGES,
 ) -> Path:
     """Render `filepath`'s pages, OCR them, and write the `.ocr.md` sidecar."""
     sidecar = filepath.with_name(filepath.stem + ".ocr.md")
@@ -132,7 +155,11 @@ def ocr_pdf_to_sidecar(
         log.info(f"  [dry-run] would OCR {len(images)} page(s) and write {sidecar}")
         return sidecar
 
-    markdown = ocr_images(images, provider=provider, api_key=api_key, model=model)
+    markdown = ocr_images(
+        images, provider=provider, api_key=api_key, model=model, batch_pages=batch_pages
+    )
+    if not markdown.strip():
+        raise RuntimeError(f"OCR returned no text for {filepath.name}")
     sidecar.write_text(markdown, encoding="utf-8")
     log.info(f"  Wrote {sidecar}")
     return sidecar

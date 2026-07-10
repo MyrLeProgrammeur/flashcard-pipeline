@@ -24,3 +24,13 @@ pipeline:
   supported_extensions: [".pdf", ".pptx", ".ppt", ".md", ".txt"]
   max_parallel_files: 5   # fichiers analysés en parallèle
   max_parallel_themes: 5  # thèmes traités en parallèle
+
+ocr:
+  # OCR automatique des PDF scannés (aucune couche texte, pas de sidecar .ocr.md).
+  # Nécessite GEMINI_API_KEY. Si absent : le fichier est signalé, jamais traité en silence.
+  enabled: true
+  provider: "gemini"
+  model: "gemini-3.5-flash"  # GA, multimodal, 1M tokens d'entrée
+  dpi: 200
+  batch_pages: 20   # pages par requête — la taille du payload borne, pas le contexte
+  max_pages: 400    # garde-fou coût : au-delà, on signale au lieu d'OCRiser

@@ -34,8 +34,9 @@ Your courses (PDF/PPTX)
 ## Requirements
 
 - Python 3.10+
-- Linux (systemd for the hourly timer)
+- Linux (systemd for the 5-minute timer)
 - An [Infercom](https://infercom.ai) API key
+- A [Google Gemini](https://aistudio.google.com/apikey) API key (for OCR of scanned PDFs)
 - [AnkiDroid](https://github.com/ankidroid/Anki-Android) on your phone
 - [Syncthing](https://syncthing.net) (optional, for phone sync)
 
@@ -50,7 +51,7 @@ bash install.sh
 The installer:
 1. Creates a Python virtualenv and installs dependencies
 2. Generates a `~/.config/flashcard-pipeline/env` file for your API key
-3. Installs a systemd user timer that runs the pipeline every hour
+3. Installs a systemd user timer that runs the pipeline every 5 minutes
 
 ## Configuration
 
@@ -59,9 +60,30 @@ The installer:
 Edit `~/.config/flashcard-pipeline/env`:
 ```
 INFERCOM_API_KEY=your-key-here
+GEMINI_API_KEY=your-key-here
 ```
 
-Get your key at [infercom.ai](https://infercom.ai).
+Get your keys at [infercom.ai](https://infercom.ai) and
+[aistudio.google.com](https://aistudio.google.com/apikey).
+
+### Scanned PDFs
+
+A PDF with no text layer (lecture photos, handwritten sheets) is OCR'd
+automatically: the pipeline renders its pages and sends them to Gemini, writing
+a `<name>.ocr.md` sidecar next to the source. The sidecar is written once and
+reused, so a scan is only ever paid for on its first run.
+
+Guards, all in `config.yaml` under `ocr:` — a scan is **never** dropped
+silently; if any guard trips, the file is reported and left for the next run:
+
+| Setting | Default | Purpose |
+|---------|---------|---------|
+| `enabled` | `true` | Turn auto-OCR off entirely |
+| `model` | `gemini-3.5-flash` | Vision model used for transcription |
+| `batch_pages` | `20` | Pages per request — payload size is the limit, not context |
+| `max_pages` | `400` | Cost guard; over this, the file is reported, not OCR'd |
+
+Without `GEMINI_API_KEY`, scans are reported and skipped rather than OCR'd.
 
 ### 2. Folder paths
 
