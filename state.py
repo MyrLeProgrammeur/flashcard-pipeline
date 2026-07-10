@@ -52,6 +52,10 @@ class StateManager:
             for f in input_dir.rglob(f"*{ext}"):
                 if f.name.startswith(".syncthing") or f.name.startswith("syncthing-"):
                     continue
+                # `.ocr.md` is a sidecar produced by tools/ocr_scans.py and read
+                # back by parsers/pdf_parser.py — it is an output, not a course.
+                if f.name.endswith(".ocr.md"):
+                    continue
                 if not self.is_processed(f):
                     new_files.append(f)
         return new_files

@@ -1,5 +1,5 @@
 """
-Flashcard pipeline entry point. Launched hourly by systemd timer.
+Flashcard pipeline entry point. Launched every 5 minutes by a systemd timer.
 """
 import difflib
 import logging
@@ -61,10 +61,16 @@ def process_group(
             content = parse_file(filepath)
             if content.strip():
                 documents[doc_type] = (filepath, content)
+            else:
+                log.warning(
+                    f"  No text extracted from {filepath.name} — likely a scan with no OCR sidecar. "
+                    f"Run: python tools/ocr_scans.py '{filepath}'"
+                )
         except Exception as e:
             log.error(f"  Parse error {filepath.name}: {e}")
 
     if not documents:
+        log.error(f"  Group {group.base_name!r}: no readable text in any file — skipped, no cards built.")
         return None
 
     log.info(f"Analysing group: {group.base_name!r} ({list(documents.keys())})")
@@ -322,7 +328,7 @@ def run_pipeline(config_path: Path = Path("config.yaml")):
     #    nothing due to an error (retry next run), and record the .apkg it fed
     #    into so a deleted deck re-qualifies the file for rebuilding.
     for group, analysis in analyses:
-        outcome = subject_outcome.get(analysis["subject"])
+        outcome = subject_outcome.get(matiere_of(group, analysis))
         if outcome is None:
             continue  # subject skipped (e.g. aggregator error) → retry next run
         db_path, total_added, had_error = outcome
