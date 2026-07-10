@@ -47,6 +47,62 @@ def subject_to_filename(subject: str) -> str:
     return f"{safe}.apkg"
 
 
+def _page_count(filepath: Path) -> int:
+    import fitz  # PyMuPDF
+
+    with fitz.open(filepath) as doc:
+        return doc.page_count
+
+
+def ensure_ocr_sidecar(filepath: Path, cfg: dict) -> bool:
+    """A PDF with no text layer and no `.ocr.md` sidecar: OCR it so the next
+    parse can read it. Returns True if a sidecar now exists. Never raises —
+    a failure is reported and the file is left for the next run to retry."""
+    ocr_cfg = cfg.get("ocr", {})
+    if not ocr_cfg.get("enabled") or filepath.suffix.lower() != ".pdf":
+        return False
+
+    if filepath.with_name(filepath.stem + ".ocr.md").exists():
+        return False  # sidecar exists but parse still came back empty
+
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        log.warning(f"  {filepath.name} is a scan but GEMINI_API_KEY is unset — cannot OCR.")
+        return False
+
+    try:
+        pages = _page_count(filepath)
+    except Exception as e:
+        log.error(f"  Cannot read {filepath.name} to count pages: {e}")
+        return False
+
+    max_pages = ocr_cfg.get("max_pages", 400)
+    if pages > max_pages:
+        log.warning(
+            f"  {filepath.name} has {pages} pages, over the {max_pages}-page OCR cap. "
+            f"Raise ocr.max_pages, or run: python tools/ocr_scans.py '{filepath}'"
+        )
+        return False
+
+    from tools.ocr_scans import ocr_pdf_to_sidecar
+
+    log.info(f"  {filepath.name}: no text layer — OCR'ing {pages} page(s) with {ocr_cfg['model']}")
+    try:
+        ocr_pdf_to_sidecar(
+            filepath,
+            provider=ocr_cfg.get("provider", "gemini"),
+            api_key=api_key,
+            model=ocr_cfg["model"],
+            dpi=ocr_cfg.get("dpi", 200),
+            dry_run=False,
+            batch_pages=ocr_cfg.get("batch_pages", 20),
+        )
+        return True
+    except Exception as e:
+        log.error(f"  OCR failed for {filepath.name}: {e} — will retry next run.")
+        return False
+
+
 def process_group(
     client: OpenAI,
     cfg: dict,
@@ -59,12 +115,15 @@ def process_group(
         log.info(f"  Parsing [{doc_type}]: {filepath.name}")
         try:
             content = parse_file(filepath)
+            if not content.strip() and ensure_ocr_sidecar(filepath, cfg):
+                content = parse_file(filepath)  # sidecar now exists → re-read
+
             if content.strip():
                 documents[doc_type] = (filepath, content)
             else:
                 log.warning(
-                    f"  No text extracted from {filepath.name} — likely a scan with no OCR sidecar. "
-                    f"Run: python tools/ocr_scans.py '{filepath}'"
+                    f"  No text extracted from {filepath.name} and no OCR sidecar produced — "
+                    f"skipped. Run: python tools/ocr_scans.py '{filepath}'"
                 )
         except Exception as e:
             log.error(f"  Parse error {filepath.name}: {e}")
